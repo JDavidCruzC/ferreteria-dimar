@@ -881,7 +881,7 @@ El sistema cumple con los objetivos planteados y los lineamientos de **CMMI-DEV 
 ## 15. Anexos
 
 - **Evidencias Jira:** tableros y reportes de velocity.
-- **Capturas del Sistema:** ver carpeta `docs/screenshots/`.
+- **Capturas del Sistema:** ver carpeta https://drive.google.com/drive/folders/1xBSykE-jT6KWJYYXtF-XehdBqj7kM0P0?usp=sharing.
 - **Diagramas UML:** sección 10 de este documento.
 - **Evidencias de Testing:** reportes Vitest en CI.
 - **Enlace del Sistema:** https://ferreteria-dimar.vercel.app
