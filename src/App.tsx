@@ -1,0 +1,143 @@
+import { Toaster } from "@/components/ui/toaster";
+import { Toaster as Sonner } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { HashRouter as BrowserRouter, Routes, Route } from "react-router-dom";
+import { ThemeProvider, useTheme } from "@/features/theme/ThemeProvider";
+import SeasonalParticles from "@/features/theme/SeasonalParticles";
+import ProtectedRoute from "@/features/auth/components/ProtectedRoute";
+import { AuthProvider } from "@/features/auth/hooks/useAuth";
+
+// Shop pages
+import HomePage from "@/features/shop/pages/HomePage";
+import CatalogPage from "@/features/shop/pages/CatalogPage";
+import ProductDetailPage from "@/features/shop/pages/ProductDetailPage";
+import AboutPage from "@/features/shop/pages/AboutPage";
+import ContactPage from "@/features/shop/pages/ContactPage";
+import AccountPage from "@/features/shop/pages/AccountPage";
+
+// Auth pages
+import LoginPage from "@/features/auth/pages/LoginPage";
+import RegisterPage from "@/features/auth/pages/RegisterPage";
+import ForgotPasswordPage from "@/features/auth/pages/ForgotPasswordPage";
+import ResetPasswordPage from "@/features/auth/pages/ResetPasswordPage";
+
+// Checkout
+import CheckoutPage from "@/features/checkout/pages/CheckoutPage";
+
+// Admin
+import AdminLayout from "@/features/admin/layout/AdminLayout";
+import DashboardPage from "@/features/admin/pages/DashboardPage";
+import ProductsPage from "@/features/admin/pages/ProductsPage";
+import CategoriesPage from "@/features/admin/pages/CategoriesPage";
+import BrandsPage from "@/features/admin/pages/BrandsPage";
+import OrdersPage from "@/features/admin/pages/OrdersPage";
+import BannersPage from "@/features/admin/pages/BannersPage";
+import SettingsPage from "@/features/admin/pages/SettingsPage";
+import PaymentAccountsPage from "@/features/admin/pages/PaymentAccountsPage";
+import CompanyPage from "@/features/admin/pages/CompanyPage";
+import RolesPage from "@/features/admin/pages/RolesPage";
+import StaffPage from "@/features/admin/pages/StaffPage";
+import AttendancePage from "@/features/admin/pages/AttendancePage";
+import AccountingPage from "@/features/admin/pages/AccountingPage";
+import SalesPage from "@/features/admin/pages/SalesPage";
+import VitrinasPage from "@/features/admin/pages/VitrinasPage";
+import CustomersPage from "@/features/admin/pages/CustomersPage";
+import AppointmentsPage from "@/features/admin/pages/AppointmentsPage";
+import SuppliersPage from "@/features/admin/pages/SuppliersPage";
+import PurchasesPage from "@/features/admin/pages/PurchasesPage";
+import KardexPage from "@/features/admin/pages/KardexPage";
+import PermissionsConfigPage from "@/features/admin/pages/PermissionsConfigPage";
+import CombosPage from "@/features/admin/pages/CombosPage";
+import NotFound from "./pages/NotFound";
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+      retry: 1,
+    },
+  },
+});
+
+const SeasonalWrapper = ({ children }: { children: React.ReactNode }) => {
+  const { seasonalTheme } = useTheme();
+  const particles = seasonalTheme?.key !== "default" && seasonalTheme?.value?.particles;
+  return (
+    <>
+      {particles && <SeasonalParticles type={particles} />}
+      {children}
+    </>
+  );
+};
+
+const AdminOnlyRoute = ({ children }: { children: React.ReactNode }) => (
+  <ProtectedRoute allowedRoles={["admin"]} fallbackPath="/admin">
+    {children}
+  </ProtectedRoute>
+);
+
+const App = () => (
+  <QueryClientProvider client={queryClient}>
+    <AuthProvider>
+      <ThemeProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
+          <SeasonalWrapper>
+            <BrowserRouter>
+              <Routes>
+                {/* Shop */}
+                <Route path="/" element={<HomePage />} />
+                <Route path="/catalogo" element={<CatalogPage />} />
+                <Route path="/producto/:slug" element={<ProductDetailPage />} />
+                <Route path="/nosotros" element={<AboutPage />} />
+                <Route path="/contacto" element={<ContactPage />} />
+                <Route path="/checkout" element={<CheckoutPage />} />
+                <Route path="/cuenta" element={<AccountPage />} />
+
+                {/* Auth */}
+                <Route path="/login" element={<LoginPage />} />
+                <Route path="/registro" element={<RegisterPage />} />
+                <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+                <Route path="/reset-password" element={<ResetPasswordPage />} />
+
+                {/* Admin */}
+                <Route path="/admin" element={<ProtectedRoute allowedRoles={["admin", "moderator", "user"]}><AdminLayout /></ProtectedRoute>}>
+                  <Route index element={<DashboardPage />} />
+                  <Route path="productos" element={<ProductsPage />} />
+                  <Route path="pedidos" element={<OrdersPage />} />
+                  <Route path="ventas/pos" element={<SalesPage />} />
+
+                  <Route path="categorias" element={<AdminOnlyRoute><CategoriesPage /></AdminOnlyRoute>} />
+                  <Route path="vitrinas" element={<AdminOnlyRoute><VitrinasPage /></AdminOnlyRoute>} />
+                  <Route path="marcas" element={<AdminOnlyRoute><BrandsPage /></AdminOnlyRoute>} />
+                  <Route path="kardex" element={<KardexPage />} />
+                  <Route path="combos" element={<CombosPage />} />
+                  <Route path="compras" element={<PurchasesPage />} />
+                  <Route path="proveedores" element={<AdminOnlyRoute><SuppliersPage /></AdminOnlyRoute>} />
+                  <Route path="banners" element={<AdminOnlyRoute><BannersPage /></AdminOnlyRoute>} />
+                  <Route path="empresa" element={<AdminOnlyRoute><CompanyPage /></AdminOnlyRoute>} />
+                  <Route path="roles" element={<AdminOnlyRoute><RolesPage /></AdminOnlyRoute>} />
+                  <Route path="permisos" element={<AdminOnlyRoute><PermissionsConfigPage /></AdminOnlyRoute>} />
+                  <Route path="personal" element={<AdminOnlyRoute><StaffPage /></AdminOnlyRoute>} />
+                  <Route path="asistencias" element={<AttendancePage />} />
+                  <Route path="contabilidad" element={<AdminOnlyRoute><AccountingPage /></AdminOnlyRoute>} />
+                  <Route path="clientes" element={<CustomersPage />} />
+                  <Route path="agenda" element={<AppointmentsPage />} />
+                  <Route path="configuracion" element={<AdminOnlyRoute><SettingsPage /></AdminOnlyRoute>} />
+                  <Route path="pagos" element={<AdminOnlyRoute><PaymentAccountsPage /></AdminOnlyRoute>} />
+                </Route>
+
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </BrowserRouter>
+          </SeasonalWrapper>
+        </TooltipProvider>
+      </ThemeProvider>
+    </AuthProvider>
+  </QueryClientProvider>
+);
+
+export default App;
