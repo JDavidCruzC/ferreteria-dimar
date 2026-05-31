@@ -1,18 +1,36 @@
+-- ========== ENUMS PROTEGIDOS (SOLO CREAR SI NO EXISTEN) ==========
 
 -- Enum for user roles
-CREATE TYPE public.app_role AS ENUM ('admin', 'moderator', 'user');
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'app_role') THEN
+        CREATE TYPE public.app_role AS ENUM ('admin', 'moderator', 'user');
+    END IF;
+END $$;
 
 -- Enum for order status
-CREATE TYPE public.order_status AS ENUM ('pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled');
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'order_status') THEN
+        CREATE TYPE public.order_status AS ENUM ('pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled');
+    END IF;
+END $$;
 
 -- Enum for payment method
-CREATE TYPE public.payment_method AS ENUM ('yape', 'plin', 'bank_transfer', 'mercadopago', 'cash', 'whatsapp', 'other');
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'payment_method') THEN
+        CREATE TYPE public.payment_method AS ENUM ('yape', 'plin', 'bank_transfer', 'mercadopago', 'cash', 'whatsapp', 'other');
+    END IF;
+END $$;
 
 -- Enum for payment status
-CREATE TYPE public.payment_status AS ENUM ('pending', 'paid', 'failed', 'refunded');
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'payment_status') THEN
+        CREATE TYPE public.payment_status AS ENUM ('pending', 'paid', 'failed', 'refunded');
+    END IF;
+END $$;
+
 
 -- ========== USER ROLES ==========
-CREATE TABLE public.user_roles (
+CREATE TABLE IF NOT EXISTS public.user_roles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
   role app_role NOT NULL DEFAULT 'user',
@@ -28,11 +46,14 @@ AS $$
   SELECT EXISTS (SELECT 1 FROM public.user_roles WHERE user_id = _user_id AND role = _role)
 $$;
 
+-- Usar DROP POLICY por si ya existen en el entorno de pruebas
+DROP POLICY IF EXISTS "Users can read own roles" ON public.user_roles;
 CREATE POLICY "Users can read own roles" ON public.user_roles FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Admins can manage roles" ON public.user_roles;
 CREATE POLICY "Admins can manage roles" ON public.user_roles FOR ALL USING (public.has_role(auth.uid(), 'admin'));
 
 -- ========== PROFILES ==========
-CREATE TABLE public.profiles (
+CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL UNIQUE,
   full_name TEXT,
@@ -46,9 +67,13 @@ CREATE TABLE public.profiles (
 );
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
 CREATE POLICY "Users can view own profile" ON public.profiles FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
 CREATE POLICY "Users can update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
 CREATE POLICY "Users can insert own profile" ON public.profiles FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Admins can view all profiles" ON public.profiles;
 CREATE POLICY "Admins can view all profiles" ON public.profiles FOR SELECT USING (public.has_role(auth.uid(), 'admin'));
 
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -61,10 +86,11 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- ========== CATEGORIES ==========
-CREATE TABLE public.categories (
+CREATE TABLE IF NOT EXISTS public.categories (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   slug TEXT NOT NULL UNIQUE,
@@ -77,11 +103,13 @@ CREATE TABLE public.categories (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Categories are public" ON public.categories;
 CREATE POLICY "Categories are public" ON public.categories FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Admins manage categories" ON public.categories;
 CREATE POLICY "Admins manage categories" ON public.categories FOR ALL USING (public.has_role(auth.uid(), 'admin'));
 
 -- ========== BRANDS ==========
-CREATE TABLE public.brands (
+CREATE TABLE IF NOT EXISTS public.brands (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   slug TEXT NOT NULL UNIQUE,
@@ -91,11 +119,13 @@ CREATE TABLE public.brands (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE public.brands ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Brands are public" ON public.brands;
 CREATE POLICY "Brands are public" ON public.brands FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Admins manage brands" ON public.brands;
 CREATE POLICY "Admins manage brands" ON public.brands FOR ALL USING (public.has_role(auth.uid(), 'admin'));
 
 -- ========== PRODUCTS ==========
-CREATE TABLE public.products (
+CREATE TABLE IF NOT EXISTS public.products (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   slug TEXT NOT NULL UNIQUE,
@@ -120,14 +150,17 @@ CREATE TABLE public.products (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Products are public" ON public.products;
 CREATE POLICY "Products are public" ON public.products FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Admins manage products" ON public.products;
 CREATE POLICY "Admins manage products" ON public.products FOR ALL USING (public.has_role(auth.uid(), 'admin'));
-CREATE INDEX idx_products_category ON public.products(category_id);
-CREATE INDEX idx_products_brand ON public.products(brand_id);
-CREATE INDEX idx_products_slug ON public.products(slug);
+
+CREATE INDEX IF NOT EXISTS idx_products_category ON public.products(category_id);
+CREATE INDEX IF NOT EXISTS idx_products_brand ON public.products(brand_id);
+CREATE INDEX IF NOT EXISTS idx_products_slug ON public.products(slug);
 
 -- ========== BANNERS ==========
-CREATE TABLE public.banners (
+CREATE TABLE IF NOT EXISTS public.banners (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   title TEXT NOT NULL,
   subtitle TEXT,
@@ -142,11 +175,13 @@ CREATE TABLE public.banners (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE public.banners ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Banners are public" ON public.banners;
 CREATE POLICY "Banners are public" ON public.banners FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Admins manage banners" ON public.banners;
 CREATE POLICY "Admins manage banners" ON public.banners FOR ALL USING (public.has_role(auth.uid(), 'admin'));
 
 -- ========== ORDERS ==========
-CREATE TABLE public.orders (
+CREATE TABLE IF NOT EXISTS public.orders (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   order_number TEXT NOT NULL UNIQUE,
   user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
@@ -168,12 +203,15 @@ CREATE TABLE public.orders (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Users can view own orders" ON public.orders;
 CREATE POLICY "Users can view own orders" ON public.orders FOR SELECT USING (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Users can create orders" ON public.orders;
 CREATE POLICY "Users can create orders" ON public.orders FOR INSERT WITH CHECK (auth.uid() = user_id);
+DROP POLICY IF EXISTS "Admins manage orders" ON public.orders;
 CREATE POLICY "Admins manage orders" ON public.orders FOR ALL USING (public.has_role(auth.uid(), 'admin'));
 
 -- ========== ORDER ITEMS ==========
-CREATE TABLE public.order_items (
+CREATE TABLE IF NOT EXISTS public.order_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   order_id UUID REFERENCES public.orders(id) ON DELETE CASCADE NOT NULL,
   product_id UUID REFERENCES public.products(id) ON DELETE SET NULL,
@@ -185,27 +223,32 @@ CREATE TABLE public.order_items (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Users can view own order items" ON public.order_items;
 CREATE POLICY "Users can view own order items" ON public.order_items FOR SELECT USING (
   EXISTS (SELECT 1 FROM public.orders WHERE orders.id = order_items.order_id AND orders.user_id = auth.uid())
 );
+DROP POLICY IF EXISTS "Users can insert order items" ON public.order_items;
 CREATE POLICY "Users can insert order items" ON public.order_items FOR INSERT WITH CHECK (
   EXISTS (SELECT 1 FROM public.orders WHERE orders.id = order_items.order_id AND orders.user_id = auth.uid())
 );
+DROP POLICY IF EXISTS "Admins manage order items" ON public.order_items;
 CREATE POLICY "Admins manage order items" ON public.order_items FOR ALL USING (public.has_role(auth.uid(), 'admin'));
 
 -- ========== STORE SETTINGS ==========
-CREATE TABLE public.store_settings (
+CREATE TABLE IF NOT EXISTS public.store_settings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   key TEXT NOT NULL UNIQUE,
   value JSONB NOT NULL DEFAULT '{}',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE public.store_settings ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Settings are public readable" ON public.store_settings;
 CREATE POLICY "Settings are public readable" ON public.store_settings FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Admins manage settings" ON public.store_settings;
 CREATE POLICY "Admins manage settings" ON public.store_settings FOR ALL USING (public.has_role(auth.uid(), 'admin'));
 
 -- ========== PAYMENT ACCOUNTS ==========
-CREATE TABLE public.payment_accounts (
+CREATE TABLE IF NOT EXISTS public.payment_accounts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   method payment_method NOT NULL,
   label TEXT NOT NULL,
@@ -219,7 +262,9 @@ CREATE TABLE public.payment_accounts (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE public.payment_accounts ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Payment accounts are public" ON public.payment_accounts;
 CREATE POLICY "Payment accounts are public" ON public.payment_accounts FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Admins manage payment accounts" ON public.payment_accounts;
 CREATE POLICY "Admins manage payment accounts" ON public.payment_accounts FOR ALL USING (public.has_role(auth.uid(), 'admin'));
 
 -- ========== TRIGGERS ==========
@@ -232,6 +277,7 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS on_order_item_created ON public.order_items;
 CREATE TRIGGER on_order_item_created AFTER INSERT ON public.order_items FOR EACH ROW EXECUTE FUNCTION public.reduce_stock_on_order();
 
 CREATE OR REPLACE FUNCTION public.generate_order_number()
@@ -243,6 +289,7 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS on_order_generate_number ON public.orders;
 CREATE TRIGGER on_order_generate_number BEFORE INSERT ON public.orders FOR EACH ROW EXECUTE FUNCTION public.generate_order_number();
 
 CREATE OR REPLACE FUNCTION public.update_updated_at()
@@ -251,15 +298,25 @@ AS $$
 BEGIN NEW.updated_at = now(); RETURN NEW; END;
 $$;
 
+DROP TRIGGER IF EXISTS update_profiles_updated_at ON public.profiles;
 CREATE TRIGGER update_profiles_updated_at BEFORE UPDATE ON public.profiles FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+DROP TRIGGER IF EXISTS update_categories_updated_at ON public.categories;
 CREATE TRIGGER update_categories_updated_at BEFORE UPDATE ON public.categories FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+DROP TRIGGER IF EXISTS update_products_updated_at ON public.products;
 CREATE TRIGGER update_products_updated_at BEFORE UPDATE ON public.products FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+DROP TRIGGER IF EXISTS update_orders_updated_at ON public.orders;
 CREATE TRIGGER update_orders_updated_at BEFORE UPDATE ON public.orders FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
+
+DROP TRIGGER IF EXISTS update_store_settings_updated_at ON public.store_settings;
 CREATE TRIGGER update_store_settings_updated_at BEFORE UPDATE ON public.store_settings FOR EACH ROW EXECUTE FUNCTION public.update_updated_at();
 
--- ========== DEFAULT DATA ==========
+-- ========== DEFAULT DATA (EVITAR ENTRADAS DUPLICADAS) ==========
 INSERT INTO public.store_settings (key, value) VALUES 
   ('theme', '{"default_mode": "dark"}'::jsonb),
   ('shipping', '{"free_shipping_min": 800, "default_cost": 20}'::jsonb),
   ('contact', '{"whatsapp": "51963326971", "email": "infocomcotizaciones@gmail.com", "phone": "+51 963 326 971"}'::jsonb),
-  ('social', '{"facebook": "https://www.facebook.com/InfocomILo", "tiktok": "https://www.tiktok.com/@infocomsoluciones", "youtube": "https://www.youtube.com/@infocomilo"}'::jsonb);
+  ('social', '{"facebook": "https://www.facebook.com/InfocomILo", "tiktok": "https://www.tiktok.com/@infocomsoluciones", "youtube": "https://www.youtube.com/@infocomilo"}'::jsonb)
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;
