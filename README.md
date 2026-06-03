@@ -1009,8 +1009,106 @@ El sistema cumple con los objetivos planteados y los lineamientos de **CMMI-DEV 
 - **Evidencias Jira:** tableros y reportes de velocity.
 - **Capturas del Sistema:** ver carpeta `docs/screenshots/`.
 - **Diagramas UML:** sección 10 de este documento.
-- **Evidencias de Testing:** reportes Vitest en CI.
+- **Evidencias de Testing:** reportes Vitest en CI — ver sección **16**.
 - **Enlace del Sistema:** https://ferreteria-dimar.vercel.app
+
+---
+
+## 16. Evidencias de Testing — Vitest en CI (CMMI-DEV v1.3)
+
+> Esta sección aterriza la evidencia técnica exigida por el **Informe Técnico de Implementación de Modelos de Calidad y Procesos de Software v1.3** (CMMI-DEV v1.3 + TSP/PSP) para el sistema **DIMAR**. Cada artefacto generado por CI alimenta directamente las secciones del informe que se indican entre paréntesis.
+
+### 16.1 ¿Qué se implementó y por qué?
+
+Antes el proyecto **no tenía evidencia automatizada y reproducible** de calidad: las pruebas existían como un único archivo de ejemplo (`src/test/example.test.ts`) y se ejecutaban manualmente. Esto era insuficiente para CMMI Nivel 2 (PPQA, MA, CM) porque:
+
+- No quedaba **traza histórica** de qué pasó/falló en cada commit (CM 5.4 — líneas base).
+- No había **artefactos firmados por CI** que un auditor pudiera descargar (PPQA 6.4).
+- No existían **métricas objetivas** de defectos / cobertura para alimentar el dashboard de MA 8.x.
+
+Ahora, en cada `push` y `pull_request` a cualquier rama, GitHub Actions ejecuta el **Quality Gate** y publica reportes **JUnit + JSON** descargables durante 30 días.
+
+### 16.2 Mapeo con la estructura del informe v1.3
+
+| Sección del Informe v1.3 | Evidencia generada por este CI |
+|---|---|
+| **2.4** Control de versiones en GitHub | Workflow `.github/workflows/ci.yml` corre en cada push y deja constancia en la pestaña *Actions* |
+| **2.8** Auditoría de herramientas | Job declara versión de Node.js (`20`), ESLint, Vitest |
+| **5.2** Control de versiones (CM) | Cada corrida queda anclada al SHA del commit |
+| **5.4** Líneas base del proyecto | Artefacto `vitest-reports` retenido 30 días = snapshot inmutable |
+| **5.5** Evidencias de configuración | `package.json` con scripts `test`, `test:ci`, `test:coverage` |
+| **6.2** Checklist de verificación de calidad | Steps `Lint` + `Run Vitest` actúan como checklist automatizada |
+| **6.4** Evidencias de revisiones realizadas | Reportes JUnit publicados con `dorny/test-reporter` en cada PR |
+| **6.5** Registro de defectos detectados | Tests fallidos quedan registrados en `reports/junit.xml` y `reports/test-results.json` |
+| **6.6** Estado actual de defectos | Badge / pestaña Actions muestra estado verde / rojo en tiempo real |
+| **7.2** Defect Log del equipo (PSP) | El JSON de Vitest se puede importar a Looker Studio como Defect Log |
+| **8.1** Métricas de defectos | `numTotalTests`, `numFailedTests`, `numPassedTests` del JSON |
+| **8.2** Métricas de productividad | Duración por test y por suite (campo `duration` del JSON) |
+| **8.3** Métricas de calidad | Tasa de pass `passed / total` por corrida |
+| **8.5** Dashboard Looker Studio | El JSON se puede conectar como fuente externa |
+| **11.5** Evidencias de QA (Anexo) | Artefacto `vitest-reports.zip` descargable desde Actions |
+
+### 16.3 Estructura técnica
+
+```text
+.github/workflows/ci.yml      ← Workflow Quality Gate (lint + tests)
+src/test/setup.ts              ← Polyfills jsdom (matchMedia)
+src/test/example.test.ts       ← Smoke test
+src/lib/sanitize.test.ts       ← 11 tests sobre sanitización (XSS, email, schemas Zod)
+vitest.config.ts               ← Configuración jsdom + alias @
+reports/                       ← (generado en CI) junit.xml + test-results.json
+```
+
+### 16.4 Scripts disponibles
+
+| Script | Propósito | Cuándo se usa |
+|---|---|---|
+| `npm test` | Corre Vitest una vez (modo dev local) | Antes de commitear |
+| `npm run test:watch` | Vitest en modo observador | Durante TDD |
+| `npm run test:ci` | Vitest con 3 reporters (default + junit + json) | **GitHub Actions** |
+| `npm run test:coverage` | Vitest con cobertura de líneas/branches | Opcional, on-demand |
+
+### 16.5 Pipeline `Quality Gate` (resumen)
+
+1. **Checkout** del repo en el SHA del commit.
+2. **Setup Node.js 20** con caché de `npm`.
+3. **`npm ci`** → instalación reproducible desde `package-lock.json` (CM 5.2).
+4. **ESLint** sobre todo el proyecto (PPQA 6.2 — checklist de estilo).
+5. **Vitest `test:ci`** → genera `reports/junit.xml` + `reports/test-results.json`.
+6. **Upload Artifact** `vitest-reports` (retención **30 días**) → PPQA 6.4 / Anexo 11.5.
+7. **Publish JUnit summary** en la UI del PR vía `dorny/test-reporter`.
+
+### 16.6 Suite de tests inicial — `src/lib/sanitize.test.ts`
+
+| # | Test | Riesgo cubierto |
+|---|---|---|
+| 1 | Elimina `<script>` | XSS reflejado |
+| 2 | Remueve `onclick=` | XSS por handler inline |
+| 3 | Bloquea `javascript:` | XSS por URL maliciosa |
+| 4 | Colapsa espacios y `trim` | Datos sucios |
+| 5 | Respeta `maxLength` | Overflow de columnas |
+| 6 | `sanitizeEmail` normaliza minúsculas | Duplicados por mayúsculas |
+| 7 | `sanitizePhone` filtra caracteres | Inyección en SMS/WhatsApp |
+| 8 | `loginSchema` acepta válidos | Regression guard |
+| 9 | `loginSchema` rechaza email inválido | Validación REQM 3.5 |
+| 10 | `registerSchema` rechaza passwords distintas | UX + integridad |
+| 11 | `registerSchema` rechaza nombre con `<script>` | XSS desde signup |
+
+Resultado de la última corrida local: **12/12 tests passed** en 3.02s.
+
+### 16.7 Cómo descargar la evidencia (para el sustento físico del informe)
+
+1. Entrar al repo en GitHub → pestaña **Actions**.
+2. Abrir la última corrida verde del workflow **CI - Quality Gate**.
+3. Sección **Artifacts** → descargar **`vitest-reports`** (`.zip`).
+4. Contiene `junit.xml` (compatible con Jira/Looker Studio) y `test-results.json` (para gráficos de MA 8.x).
+
+### 16.8 Roadmap de testing (TSP — mejora continua)
+
+- [ ] Sumar tests de `useAuth` y `usePermissions` con mocks de Supabase (REQM 3.1).
+- [ ] Habilitar `@vitest/coverage-v8` y publicar % de cobertura como badge.
+- [ ] Agregar Playwright para pruebas E2E del flujo POS (Sec. 14 del informe).
+- [ ] Webhook desde Actions → Looker Studio para auto-poblar el dashboard de **MA 8.5**.
 
 ---
 
